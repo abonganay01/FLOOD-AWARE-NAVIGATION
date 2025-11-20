@@ -1,220 +1,355 @@
 /*
- app.js - MapLibre + OSRM demo integration
- - Free: uses MapLibre (demotiles) and public OSRM demo server.
- - No API keys required.
- - Click on the map to report floods (stored in localStorage).
- - Enter addresses or lat,lng strings; if addresses are used the app will try to use
-   the browser's Geolocation API for a crude resolution fallback (best to use lat,lng).
- - For production, replace OSRM public server with your own self-hosted OSRM.
+ app.js — Project NOAH basemap + fallback + OSRM routing + AI-ready FloodLearner
 */
 
-const MAP_STYLE = 'https://demotiles.maplibre.org/style.json';
-const OSRM_SERVER = 'https://router.project-osrm.org'; // public demo; self-host for production
+console.log("app.js loaded: initializing diagnostics...");
 
-// Simple FloodLearner shim storing counts in localStorage
+/* ============================================================
+   1. BASEMAP SOURCES (NOAH → Carto → MapLibre fallback)
+   ============================================================ */
+const NOAH_TILE_URL = "https://noah.up.edu.ph/api/tiles/{z}/{x}/{y}.png";
+const CARTO_STYLE = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json";
+const MAPLIBRE_DEMO = "https://demotiles.maplibre.org/style.json";
+
+let chosenStyle = MAPLIBRE_DEMO; // fallback default
+
+/* ============================================================
+   2. NOAH GeoJSON hazard data (if available)
+   ============================================================ */
+const NOAH_GEOJSON = "https://noah.up.edu.ph/api/flood-geojson.json";
+
+/* ============================================================
+   3. OSRM settings
+   ============================================================ */
+const OSRM_SERVER = "https://router.project-osrm.org"; // demo server
+
+/* ============================================================
+   4. AI-ready FloodLearner (local grid store)
+   ============================================================ */
 const FloodLearner = {
-  _key(lat, lng, precision = 3) { return `${Number(lat).toFixed(precision)}|${Number(lng).toFixed(precision)}`; },
-  getAll() { try { return JSON.parse(localStorage.getItem('flood_grid')||'{}'); } catch(e){ return {}; } },
-  increment(lat,lng) { const key=this._key(lat,lng); const all=this.getAll(); all[key]=(all[key]||0)+1; localStorage.setItem('flood_grid', JSON.stringify(all)); return all[key]; },
-  scoreAt(lat,lng){ const all=this.getAll(); return all[this._key(lat,lng)]||0; },
-  clear(){ localStorage.removeItem('flood_grid'); }
+  _key(lat, lng, p = 3) {
+    return `${lat.toFixed(p)}|${lng.toFixed(p)}`;
+  },
+  all() {
+    try {
+      return JSON.parse(localStorage.getItem("flood_grid")) || {};
+    } catch {
+      return {};
+    }
+  },
+  increment(lat, lng) {
+    const k = this._key(lat, lng);
+    const grid = this.all();
+    grid[k] = (grid[k] || 0) + 1;
+    localStorage.setItem("flood_grid", JSON.stringify(grid));
+    return grid[k];
+  },
+  score(lat, lng) {
+    const grid = this.all();
+    return grid[this._key(lat, lng)] || 0;
+  },
+  clear() {
+    localStorage.removeItem("flood_grid");
+  }
 };
 
-function setStatus(msg){ const el=document.getElementById('status'); if(el) el.textContent=msg; console.log('[status]',msg); }
+/* ============================================================
+   Helper: Update status text
+   ============================================================ */
+function setStatus(msg) {
+  const box = document.getElementById("status");
+  if (box) box.textContent = msg;
+  console.log("[STATUS]", msg);
+}
 
-// init map
-let map, routeLayers = [], noahLayerAdded=false;
+/* ============================================================
+   5. Test NOAH tile availability
+   ============================================================ */
+async function testNoahTiles() {
+  const testURL = NOAH_TILE_URL
+    .replace("{z}", "10")
+    .replace("{x}", "865")
+    .replace("{y}", "512");
 
-function initMap() {
+  try {
+    const r = await fetch(testURL, { method: "HEAD" });
+    if (r.ok) {
+      console.log("NOAH tiles are available.");
+      return true;
+    }
+  } catch (e) {
+    console.warn("NOAH tile test failed:", e);
+  }
+  return false;
+}
+
+/* ============================================================
+   6. Initialize map
+   ============================================================ */
+let map;
+
+async function initMap() {
+  setStatus("Checking NOAH tiles...");
+
+  const noahAvailable = await testNoahTiles();
+
+  if (noahAvailable) {
+    console.log("Using NOAH raster tiles as basemap...");
+    chosenStyle = {
+      version: 8,
+      sources: {
+        noah: {
+          type: "raster",
+          tiles: [NOAH_TILE_URL],
+          tileSize: 256
+        }
+      },
+      layers: [
+        {
+          id: "noah-basemap",
+          type: "raster",
+          source: "noah"
+        }
+      ]
+    };
+  } else {
+    console.warn("NOAH tiles unavailable — using Carto Voyager...");
+    chosenStyle = CARTO_STYLE;
+  }
+
   map = new maplibregl.Map({
-    container: 'map',
-    style: MAP_STYLE,
+    container: "map",
+    style: chosenStyle,
     center: [120.9842, 14.5995],
     zoom: 12
   });
 
   map.addControl(new maplibregl.NavigationControl());
 
-  // click to report flood
-  map.on('click', (e) => {
-    const lat = e.lngLat.lat, lng = e.lngLat.lng;
+  /* ============================================================
+     Click → record flood report
+     ============================================================ */
+  map.on("click", (e) => {
+    const lat = e.lngLat.lat;
+    const lng = e.lngLat.lng;
+
     const count = FloodLearner.increment(lat, lng);
-    setStatus(`Flood report recorded locally (count=${count})`);
-    // simple visual marker
-    const id = 'flood-marker-' + Date.now();
-    const el = document.createElement('div');
-    el.className = 'flood-marker';
-    el.title = `Flood reports: ${count}`;
-    el.style.width='12px'; el.style.height='12px'; el.style.borderRadius='6px'; el.style.background='rgba(255,0,0,0.8)';
-    new maplibregl.Marker(el).setLngLat([lng,lat]).addTo(map);
+    setStatus(`Flood report added (count = ${count})`);
+
+    const mark = document.createElement("div");
+    mark.className = "flood-marker";
+
+    new maplibregl.Marker(mark)
+      .setLngLat([lng, lat])
+      .addTo(map);
   });
 
-  // try to load NOAH geojson overlay
-  const NOAH_URL = 'https://noah.up.edu.ph/api/flood-geojson.json';
-  fetch(NOAH_URL).then(r=>{ if(!r.ok) throw new Error('NOAH unavailable'); return r.json(); }).then(gj=>{
-    try {
-      map.addSource('noah', { type:'geojson', data: gj });
-      map.addLayer({ id:'noah-fill', type:'fill', source:'noah', paint:{ 'fill-color':'#ff0000','fill-opacity':0.25 } });
-      map.addLayer({ id:'noah-line', type:'line', source:'noah', paint:{ 'line-color':'#990000','line-width':1 } });
-      noahLayerAdded = true;
-      setStatus('NOAH layer loaded (if available)');
-    } catch(e){ console.warn('NOAH parse failed',e); }
-  }).catch(e=>{ console.info('NOAH fetch skipped or failed', e && e.message ? e.message : e); });
-
+  loadNoahGeoJSON();
 }
 
-// Utility: parse "lat,lng" or return null
-function parseLatLngString(s){
-  if(!s) return null;
-  const parts = s.split(',').map(p=>p.trim());
-  if(parts.length===2){
-    const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
-    if(!isNaN(lat) && !isNaN(lng)) return { lat, lng };
-  }
-  return null;
-}
-
-// Geocode minimal fallback: if input is lat,lng use it, otherwise attempt to use browser geolocation (best-effort)
-async function resolveLocation(input){
-  const p = parseLatLngString(input);
-  if(p) return p;
-  // Attempt to use Nominatim geocoding (free) — rate-limited
+/* ============================================================
+   7. Load NOAH GeoJSON hazard polygons
+   ============================================================ */
+async function loadNoahGeoJSON() {
+  setStatus("Loading NOAH hazard polygons...");
   try {
-    const url = 'https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(input);
-    const r = await fetch(url);
-    if(!r.ok) throw new Error('Nominatim failed');
-    const j = await r.json();
-    if(j && j.length>0) return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
-  } catch(e){
-    console.warn('Geocode failed', e);
+    const r = await fetch(NOAH_GEOJSON);
+    if (!r.ok) throw new Error("NOAH geojson rejected");
+    const gj = await r.json();
+
+    map.addSource("noahHazard", {
+      type: "geojson",
+      data: gj
+    });
+
+    map.addLayer({
+      id: "noahHazard-fill",
+      type: "fill",
+      source: "noahHazard",
+      paint: {
+        "fill-color": "#ff0000",
+        "fill-opacity": 0.25
+      }
+    });
+
+    map.addLayer({
+      id: "noahHazard-outline",
+      type: "line",
+      source: "noahHazard",
+      paint: {
+        "line-color": "#990000",
+        "line-width": 1
+      }
+    });
+
+    setStatus("NOAH hazard polygons loaded.");
+  } catch (e) {
+    console.warn("NOAH GeoJSON unavailable:", e);
+    setStatus("NOAH hazard polygons unavailable.");
   }
+}
+
+/* ============================================================
+   8. Geocoding helper (Nominatim)
+   ============================================================ */
+async function resolveLocation(text) {
+  text = text.trim();
+  const raw = text.split(",").map(x => x.trim());
+  if (raw.length === 2) {
+    const lat = parseFloat(raw[0]);
+    const lng = parseFloat(raw[1]);
+    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+  }
+
+  try {
+    const url =
+      "https://nominatim.openstreetmap.org/search?format=json&q=" +
+      encodeURIComponent(text);
+    const r = await fetch(url);
+    const j = await r.json();
+    if (j.length > 0) {
+      return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
+    }
+  } catch (e) {
+    console.warn("Geocode failed:", e);
+  }
+
   return null;
 }
 
-// draw route GeoJSON on map
-function drawRoute(geojson, idSuffix){
-  const id = 'route-' + idSuffix;
-  // remove previous layers with same id
-  if(map.getLayer(id + '-line')) { map.removeLayer(id + '-line'); }
-  if(map.getSource(id)) { map.removeSource(id); }
-  map.addSource(id, { type:'geojson', data: geojson });
-  map.addLayer({ id: id + '-line', type:'line', source:id, paint:{ 'line-color':'#007cbf', 'line-width': 6, 'line-opacity': 0.8 } });
-  // store for cleanup
-  routeLayers.push(id);
-}
+/* ============================================================
+   9. Request OSRM route
+   ============================================================ */
+async function getOSRMRoute(o, d) {
+  const coords = `${o.lng},${o.lat};${d.lng},${d.lat}`;
+  const url = `${OSRM_SERVER}/route/v1/driving/${coords}?overview=full&alternatives=true&geometries=geojson`;
 
-// clear previous routes
-function clearRoutes(){
-  for(const id of routeLayers){
-    if(map.getLayer(id + '-line')) map.removeLayer(id + '-line');
-    if(map.getSource(id)) map.removeSource(id);
-  }
-  routeLayers = [];
-}
-
-// score route by sampling points and summing FloodLearner scores
-function scoreRouteByGeojson(geojson){
-  let total = 0, count = 0;
-  // geojson.linestring coordinates: [ [lng,lat], ... ]
-  if(!geojson || !geojson.coordinates) return 0;
-  const coords = geojson.coordinates;
-  const step = Math.max(1, Math.floor(coords.length / 30));
-  for(let i=0;i<coords.length;i+=step){
-    const [lng,lat] = coords[i];
-    total += FloodLearner.scoreAt(lat,lng);
-    count++;
-  }
-  return count>0 ? total / count : 0;
-}
-
-// request OSRM route
-async function requestOSRM(origin, destination){
-  // origin/destination as {lat,lng}
-  const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
-  const url = `${OSRM_SERVER}/route/v1/driving/${coords}?alternatives=true&overview=full&geometries=geojson`;
   const r = await fetch(url);
-  if(!r.ok) throw new Error('OSRM route request failed: ' + r.status);
+  if (!r.ok) throw new Error("OSRM request failed");
   return await r.json();
 }
 
-// main routing flow
-async function handleRoute(originInput, destinationInput, threshold){
-  setStatus('Resolving locations...');
-  const origin = await resolveLocation(originInput);
-  const dest = await resolveLocation(destinationInput);
-  if(!origin || !dest){ setStatus('Failed to resolve origin or destination. Use lat,lng or a valid address.'); return; }
+/* ============================================================
+   10. Draw a route
+   ============================================================ */
+function drawRoute(geojson, id) {
+  const src = `r-src-${id}`;
+  const line = `r-line-${id}`;
 
-  setStatus('Requesting routes from OSRM...');
-  try {
-    const res = await requestOSRM(origin, dest);
-    if(!res || !res.routes || res.routes.length===0){ setStatus('No routes returned'); return; }
-    clearRoutes();
-    // score each route and draw
-    const scored = [];
-    for(let i=0;i<res.routes.length;i++){
-      const r = res.routes[i];
-      const geo = r.geometry; // GeoJSON LineString
-      const score = scoreRouteByGeojson(geo);
-      scored.push({ index:i, score, route: r, geometry: geo });
-      // draw each route with thinner line; highlight best later
-      drawRoute({ type: 'Feature', geometry: geo }, 'alt-' + i);
+  if (map.getLayer(line)) map.removeLayer(line);
+  if (map.getSource(src)) map.removeSource(src);
+
+  map.addSource(src, { type: "geojson", data: geojson });
+
+  map.addLayer({
+    id: line,
+    type: "line",
+    source: src,
+    paint: {
+      "line-color": "#007cbf",
+      "line-width": id === "best" ? 6 : 3,
+      "line-opacity": id === "best" ? 1.0 : 0.5
     }
-    // sort by score ascending
-    scored.sort((a,b)=>a.score-b.score);
-    const best = scored[0];
-    // highlight best route
-    if(best){
-      // draw thick highlighted line
-      drawRoute({ type:'Feature', geometry: best.geometry }, 'best');
-      setStatus(`Best route selected (risk ${best.score.toFixed(2)}).`);
-      // if risk too high, attempt simple detour by offsetting midpoint
-      if(best.score >= threshold){
-        setStatus('Best route high risk — attempting detour...');
-        // compute midpoint coordinate
-        const midIdx = Math.floor(best.geometry.coordinates.length/2);
-        const [midLng, midLat] = best.geometry.coordinates[midIdx];
-        // small offset (~0.01 degrees ~1km) try a detour waypoint
-        const offsetPoint = { lat: midLat + 0.01, lng: midLng + 0.01 };
-        try {
-          const detourRes = await requestOSRM(origin, dest + ''); // we will instead attempt with waypoint by building a coords string
-          // OSRM public API doesn't support waypoints in simple GET easily; skip complex detour for now
-          setStatus(`No safer detour found (risk ${best.score.toFixed(2)}).`);
-        } catch(e){
-          console.warn('Detour attempt error', e);
-          setStatus(`No safer detour found (risk ${best.score.toFixed(2)}).`);
-        }
+  });
+}
+
+/* ============================================================
+   11. Score route by local flood grid
+   ============================================================ */
+function scoreRoute(geojson) {
+  let total = 0;
+  let c = 0;
+
+  const pts = geojson.coordinates;
+  const step = Math.max(1, Math.floor(pts.length / 30));
+
+  for (let i = 0; i < pts.length; i += step) {
+    const [lng, lat] = pts[i];
+    total += FloodLearner.score(lat, lng);
+    c++;
+  }
+
+  return c > 0 ? total / c : 0;
+}
+
+/* ============================================================
+   12. Main routing handler
+   ============================================================ */
+async function handleRouting() {
+  const textO = document.getElementById("origin").value;
+  const textD = document.getElementById("destination").value;
+  const threshold = Number(document.getElementById("threshold").value) || 2;
+
+  setStatus("Resolving locations...");
+
+  const o = await resolveLocation(textO);
+  const d = await resolveLocation(textD);
+
+  if (!o || !d) {
+    setStatus("Failed to resolve origin or destination.");
+    return;
+  }
+
+  setStatus("Requesting OSRM routes...");
+
+  try {
+    const res = await getOSRMRoute(o, d);
+    if (!res.routes || res.routes.length === 0) {
+      setStatus("No routes returned.");
+      return;
+    }
+
+    let best = null;
+    let bestScore = Infinity;
+
+    res.routes.forEach((r, idx) => {
+      const geo = r.geometry;
+      const sc = scoreRoute(geo);
+
+      drawRoute({ type: "Feature", geometry: geo }, "alt-" + idx);
+
+      if (sc < bestScore) {
+        bestScore = sc;
+        best = geo;
+      }
+    });
+
+    if (best) {
+      drawRoute({ type: "Feature", geometry: best }, "best");
+      setStatus(`Best route selected (risk ${bestScore.toFixed(2)}).`);
+
+      if (bestScore >= threshold) {
+        setStatus(`Warning: route risk ${bestScore.toFixed(2)} exceeds threshold.`);
       }
     }
-  } catch(e){
+  } catch (e) {
     console.error(e);
-    setStatus('Routing failed: ' + (e.message || e));
+    setStatus("Routing failed.");
   }
 }
 
-// wire UI
-function wireUI(){
-  const form = document.getElementById('route-form');
-  form.addEventListener('submit', (ev)=>{
-    ev.preventDefault();
-    const origin = document.getElementById('origin').value;
-    const destination = document.getElementById('destination').value;
-    const threshold = Number(document.getElementById('threshold').value) || 2;
-    handleRoute(origin, destination, threshold);
-  });
+/* ============================================================
+   13. Wire UI events
+   ============================================================ */
+function wireUI() {
+  document
+    .getElementById("route-form")
+    .addEventListener("submit", (e) => {
+      e.preventDefault();
+      handleRouting();
+    });
 
-  document.getElementById('clear-memory').addEventListener('click', ()=>{
+  document.getElementById("clear-memory").addEventListener("click", () => {
     FloodLearner.clear();
-    setStatus('Local flood memory cleared');
-    clearRoutes();
+    setStatus("Local flood memory cleared.");
   });
 }
 
-// init everything
-function init(){
-  initMap();
+/* ============================================================
+   14. Initialize everything
+   ============================================================ */
+window.addEventListener("load", () => {
   wireUI();
-  setStatus('Map initialized (MapLibre). Use lat,lng for reliable routing.');
-}
-
-// run
-window.addEventListener('load', init);
+  initMap();
+  setStatus("Map loading...");
+});
