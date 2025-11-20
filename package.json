@@ -1,0 +1,11 @@
+{
+  "name": "flood-safe-website",
+  "version": "1.0.0",
+  "description": "AI FloodSafe Navigator demo site (MapLibre + OSRM)",
+  "scripts": {
+    "start": "npx http-server src -p 5500",
+    "serve": "npx http-server src -p 5500"
+  },
+  "author": "",
+  "license": "MIT"
+}

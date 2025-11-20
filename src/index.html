@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI FloodSafe Navigator — Demo (MapLibre + OSRM)</title>
+
+  <link rel="stylesheet" href="css/styles.css" />
+
+  <!-- MapLibre GL JS -->
+  <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+</head>
+<body>
+  <div id="app" class="app-root">
+    <aside class="panel">
+      <h1>AI FloodSafe Navigator</h1>
+      <p class="lead">Real-time street-level flood risk prototype — NOAH overlay, crowd reports, and flood-aware routing (MapLibre + OSRM).</p>
+
+      <form id="route-form">
+        <label for="origin">Origin (address or "lat,lng")</label>
+        <input id="origin" placeholder="e.g. Quezon City or 14.6760,121.0437" autocomplete="off" />
+
+        <label for="destination">Destination (address or "lat,lng")</label>
+        <input id="destination" placeholder="e.g. Makati or 14.5547,121.0244" autocomplete="off" />
+
+        <label for="threshold">Risk threshold</label>
+        <input id="threshold" type="number" value="2" min="0" />
+
+        <button id="go-btn" type="submit">Calculate & Navigate</button>
+      </form>
+
+      <div class="status-box">
+        <strong>Status:</strong>
+        <pre id="status">Idle</pre>
+      </div>
+
+      <div class="actions">
+        <button id="clear-memory" type="button">Clear Local Flood Memory</button>
+      </div>
+
+      <hr />
+
+      <h3>Project screenshots (local)</h3>
+      <ul>
+        <li><a href="docs/screenshots/582284537_2236403060176744_4408406701664767618_n.jpg" target="_blank">Screenshot 1</a></li>
+        <li><a href="docs/screenshots/582342251_863438322689820_546795045267350628_n.jpg" target="_blank">Screenshot 2</a></li>
+        <li><a href="docs/screenshots/582272343_1048096297394230_5808524532382698319_n.jpg" target="_blank">Screenshot 3</a></li>
+        <li><a href="docs/screenshots/582057602_1111516801054195_574992022482687645_n.jpg" target="_blank">Screenshot 4</a></li>
+        <li><a href="docs/screenshots/d5f06fea-e14b-42ea-bbf4-41e4e35224db.png" target="_blank">Folder structure screenshot</a></li>
+      </ul>
+
+      <p class="notes">Tip: run a local server, then open <code>http://localhost:5500/</code> (or use npm start). For routing we use the public OSRM demo server; for production self-host OSRM.</p>
+    </aside>
+
+    <main class="map-container">
+      <div id="map"></div>
+    </main>
+  </div>
+
+  <!-- App scripts -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,150 @@
+:root {
+  --panel-width: 360px;
+  --bg: #f7f7f7;
+  --accent: #2b7be4;
+  --text-dark: #222;
+  --text-light: #555;
+  --border: #e2e2e2;
+}
+
+/* Reset / Base */
+* {
+  box-sizing: border-box;
+  font-family: Inter, system-ui, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #ffffff;
+  color: var(--text-dark);
+}
+
+/* Layout */
+.app-root {
+  display: flex;
+  height: 100vh;
+}
+
+.panel {
+  width: var(--panel-width);
+  padding: 20px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.panel h1 {
+  margin: 6px 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.panel .lead {
+  font-size: 14px;
+  color: var(--text-light);
+  margin-bottom: 15px;
+}
+
+label {
+  display: block;
+  margin-top: 10px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+input {
+  width: 100%;
+  padding: 10px 12px;
+  margin-top: 6px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+}
+
+input:focus {
+  border-color: var(--accent);
+}
+
+/* Buttons */
+button {
+  padding: 12px;
+  margin-top: 14px;
+  width: 100%;
+  font-size: 15px;
+  font-weight: 600;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+
+button:hover {
+  background: #2263b8;
+}
+
+/* Status area */
+.status-box {
+  margin-top: 18px;
+}
+
+.status-box pre {
+  white-space: pre-wrap;
+  background: #fff;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Small notes */
+.notes {
+  margin-top: 15px;
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+/* Map container */
+.map-container {
+  flex: 1;
+  position: relative;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  background: #e9eef8;
+}
+
+/* Divider */
+hr {
+  margin: 20px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* Fallback message when Map not available */
+.map-fallback {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  padding: 20px;
+}
+
+.map-fallback div {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 20px;
+  border-radius: 8px;
+  max-width: 500px;
+  text-align: center;
+  font-size: 15px;
+}
