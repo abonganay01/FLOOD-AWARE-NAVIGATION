@@ -1,120 +1,98 @@
 /*
- app.js — Project NOAH basemap + fallback + OSRM routing + AI-ready FloodLearner
+ app.js — UPDATED: integrates AccuWeather (via /api/accuweather proxy) and NOAH proxy (/api/noah)
+ - Uses MapLibre + OSRM (as before)
+ - Attempts to fetch NOAH GeoJSON via proxy; falls back to previous direct attempt if proxy missing
+ - Route scoring now includes AccuWeather precipitation/alerts sampled at route midpoints
+ - Map click still records local flood reports; clicking a point will also show AccuWeather info (if available)
+ - Developer-provided local screenshot path (for fallback UI) is included below:
+   file:///mnt/data/d5f06fea-e14b-42ea-bbf4-41e4e35224db.png
 */
 
-console.log("app.js loaded: initializing diagnostics...");
+console.log("app.js (with AccuWeather + NOAH proxy support) loaded.");
 
-/* ============================================================
-   1. BASEMAP SOURCES (NOAH → Carto → MapLibre fallback)
-   ============================================================ */
+/* -------------------------
+   Configuration
+   ------------------------- */
 const NOAH_TILE_URL = "https://noah.up.edu.ph/api/tiles/{z}/{x}/{y}.png";
+const NOAH_GEOJSON_DIRECT = "https://noah.up.edu.ph/api/flood-geojson.json";
+const NOAH_GEOJSON_PROXY = "/api/noah"; // serverless proxy (recommended)
+const ACCUWEATHER_PROXY = "/api/accuweather"; // serverless proxy: /api/accuweather?lat=..&lng=..
 const CARTO_STYLE = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json";
 const MAPLIBRE_DEMO = "https://demotiles.maplibre.org/style.json";
+const OSRM_SERVER = "https://router.project-osrm.org"; // public demo server
 
-let chosenStyle = MAPLIBRE_DEMO; // fallback default
+// local developer screenshot path (from uploaded files)
+const FOLDER_SCREENSHOT_LOCAL = "file:///mnt/data/d5f06fea-e14b-42ea-bbf4-41e4e35224db.png";
 
-/* ============================================================
-   2. NOAH GeoJSON hazard data (if available)
-   ============================================================ */
-const NOAH_GEOJSON = "https://noah.up.edu.ph/api/flood-geojson.json";
-
-/* ============================================================
-   3. OSRM settings
-   ============================================================ */
-const OSRM_SERVER = "https://router.project-osrm.org"; // demo server
-
-/* ============================================================
-   4. AI-ready FloodLearner (local grid store)
-   ============================================================ */
+/* -------------------------
+   FloodLearner (same shim)
+   ------------------------- */
 const FloodLearner = {
-  _key(lat, lng, p = 3) {
-    return `${lat.toFixed(p)}|${lng.toFixed(p)}`;
-  },
-  all() {
-    try {
-      return JSON.parse(localStorage.getItem("flood_grid")) || {};
-    } catch {
-      return {};
-    }
-  },
-  increment(lat, lng) {
-    const k = this._key(lat, lng);
-    const grid = this.all();
-    grid[k] = (grid[k] || 0) + 1;
-    localStorage.setItem("flood_grid", JSON.stringify(grid));
-    return grid[k];
-  },
-  score(lat, lng) {
-    const grid = this.all();
-    return grid[this._key(lat, lng)] || 0;
-  },
-  clear() {
-    localStorage.removeItem("flood_grid");
-  }
+  _key(lat, lng, p = 3) { return `${Number(lat).toFixed(p)}|${Number(lng).toFixed(p)}`; },
+  all() { try { return JSON.parse(localStorage.getItem("flood_grid") || "{}"); } catch(e){ return {}; } },
+  increment(lat, lng) { const k = this._key(lat,lng); const g = this.all(); g[k] = (g[k]||0)+1; localStorage.setItem("flood_grid", JSON.stringify(g)); return g[k]; },
+  score(lat, lng) { const g = this.all(); return g[this._key(lat,lng)]||0; },
+  clear() { localStorage.removeItem("flood_grid"); }
 };
 
-/* ============================================================
-   Helper: Update status text
-   ============================================================ */
+/* -------------------------
+   Utility / status
+   ------------------------- */
 function setStatus(msg) {
-  const box = document.getElementById("status");
-  if (box) box.textContent = msg;
+  const el = document.getElementById("status");
+  if (el) el.textContent = msg;
   console.log("[STATUS]", msg);
 }
 
-/* ============================================================
-   5. Test NOAH tile availability
-   ============================================================ */
-async function testNoahTiles() {
-  const testURL = NOAH_TILE_URL
-    .replace("{z}", "10")
-    .replace("{x}", "865")
-    .replace("{y}", "512");
-
-  try {
-    const r = await fetch(testURL, { method: "HEAD" });
-    if (r.ok) {
-      console.log("NOAH tiles are available.");
-      return true;
-    }
-  } catch (e) {
-    console.warn("NOAH tile test failed:", e);
-  }
-  return false;
+function safeFetchJSON(url, opts = {}) {
+  return fetch(url, opts).then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+    return r.json();
+  });
 }
 
-/* ============================================================
-   6. Initialize map
-   ============================================================ */
+/* -------------------------
+   Map & init
+   ------------------------- */
 let map;
+let routeSources = [];
+
+async function testNoahTileAvailability() {
+  const testURL = NOAH_TILE_URL.replace("{z}", "10").replace("{x}", "865").replace("{y}", "512");
+  try {
+    // HEAD may be blocked on some servers, fallback to GET with no-cache
+    const r = await fetch(testURL, { method: "GET", cache: "no-store" });
+    return r.ok && r.headers.get("content-type") && r.headers.get("content-type").startsWith("image");
+  } catch (e) {
+    console.warn("NOAH tiles test failed:", e);
+    return false;
+  }
+}
 
 async function initMap() {
   setStatus("Checking NOAH tiles...");
+  const noahTilesOK = await testNoahTileAvailability();
 
-  const noahAvailable = await testNoahTiles();
-
-  if (noahAvailable) {
-    console.log("Using NOAH raster tiles as basemap...");
+  let chosenStyle = MAPLIBRE_DEMO;
+  if (noahTilesOK) {
+    // create an ad-hoc style using NOAH raster tiles
     chosenStyle = {
       version: 8,
       sources: {
         noah: {
           type: "raster",
-          tiles: [NOAH_TILE_URL],
+          tiles: [ NOAH_TILE_URL ],
           tileSize: 256
         }
       },
       layers: [
-        {
-          id: "noah-basemap",
-          type: "raster",
-          source: "noah"
-        }
+        { id: "noah-basemap", type: "raster", source: "noah" }
       ]
     };
+    console.log("Using NOAH raster tiles as basemap.");
   } else {
-    console.warn("NOAH tiles unavailable — using Carto Voyager...");
-    chosenStyle = CARTO_STYLE;
+    chosenStyle = CARTO_STYLE; // prefer Carto Voyager as fallback
+    console.log("NOAH tiles not available; using Carto Voyager style.");
   }
 
   map = new maplibregl.Map({
@@ -126,230 +104,422 @@ async function initMap() {
 
   map.addControl(new maplibregl.NavigationControl());
 
-  /* ============================================================
-     Click → record flood report
-     ============================================================ */
-  map.on("click", (e) => {
-    const lat = e.lngLat.lat;
-    const lng = e.lngLat.lng;
-
+  // click to record flood and show AccuWeather popup if available
+  map.on("click", async (ev) => {
+    const lat = ev.lngLat.lat;
+    const lng = ev.lngLat.lng;
     const count = FloodLearner.increment(lat, lng);
-    setStatus(`Flood report added (count = ${count})`);
+    setStatus(`Flood report recorded (count=${count})`);
 
-    const mark = document.createElement("div");
-    mark.className = "flood-marker";
+    // add a simple marker
+    const el = document.createElement("div");
+    el.className = "flood-marker";
+    const marker = new maplibregl.Marker(el).setLngLat([lng, lat]).addTo(map);
 
-    new maplibregl.Marker(mark)
-      .setLngLat([lng, lat])
-      .addTo(map);
+    // try fetch AccuWeather info for this point (via proxy)
+    const accu = await fetchAccuWeatherProxy(lat, lng);
+    if (accu && accu.current) {
+      const cur = accu.current;
+      const html = `<strong>Weather</strong><br/>
+                    ${cur.WeatherText || "N/A"}<br/>
+                    Precip (past hour): ${cur.PrecipitationSummary?.PastHour?.Metric?.Value ?? "N/A"} ${cur.PrecipitationSummary?.PastHour?.Metric?.Unit ?? ""}`;
+      new maplibregl.Popup({ offset: 12 }).setLngLat([lng, lat]).setHTML(html).addTo(map);
+    }
   });
 
-  loadNoahGeoJSON();
+  // attempt to load NOAH hazard polygons via proxy (preferred) or direct if proxy missing
+  await attemptLoadNoahGeoJSON();
+
+  setStatus("Map ready.");
 }
 
-/* ============================================================
-   7. Load NOAH GeoJSON hazard polygons
-   ============================================================ */
-async function loadNoahGeoJSON() {
+/* -------------------------
+   NOAH GeoJSON loading helper (prefers /api/noah)
+   ------------------------- */
+async function attemptLoadNoahGeoJSON() {
   setStatus("Loading NOAH hazard polygons...");
+  // Try proxy first
   try {
-    const r = await fetch(NOAH_GEOJSON);
-    if (!r.ok) throw new Error("NOAH geojson rejected");
-    const gj = await r.json();
-
-    map.addSource("noahHazard", {
-      type: "geojson",
-      data: gj
-    });
-
-    map.addLayer({
-      id: "noahHazard-fill",
-      type: "fill",
-      source: "noahHazard",
-      paint: {
-        "fill-color": "#ff0000",
-        "fill-opacity": 0.25
-      }
-    });
-
-    map.addLayer({
-      id: "noahHazard-outline",
-      type: "line",
-      source: "noahHazard",
-      paint: {
-        "line-color": "#990000",
-        "line-width": 1
-      }
-    });
-
-    setStatus("NOAH hazard polygons loaded.");
+    const gj = await fetchNoahGeojsonProxy();
+    if (gj) {
+      addNoahHazardLayer(gj);
+      setStatus("NOAH hazard polygons loaded (via proxy).");
+      return;
+    }
   } catch (e) {
-    console.warn("NOAH GeoJSON unavailable:", e);
+    console.warn("NOAH proxy failed:", e);
+  }
+
+  // Fallback: attempt direct fetch (may be blocked by CORS)
+  try {
+    const gjDirect = await safeFetchJSON(NOAH_GEOJSON_DIRECT);
+    addNoahHazardLayer(gjDirect);
+    setStatus("NOAH hazard polygons loaded (direct).");
+    return;
+  } catch (e) {
+    console.warn("Direct NOAH GeoJSON fetch failed:", e);
     setStatus("NOAH hazard polygons unavailable.");
   }
 }
 
-/* ============================================================
-   8. Geocoding helper (Nominatim)
-   ============================================================ */
-async function resolveLocation(text) {
-  text = text.trim();
-  const raw = text.split(",").map(x => x.trim());
-  if (raw.length === 2) {
-    const lat = parseFloat(raw[0]);
-    const lng = parseFloat(raw[1]);
-    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
-  }
-
+/* -------------------------
+   Add NOAH hazard layer styling (expects GeoJSON)
+   ------------------------- */
+function addNoahHazardLayer(geojson) {
   try {
-    const url =
-      "https://nominatim.openstreetmap.org/search?format=json&q=" +
-      encodeURIComponent(text);
-    const r = await fetch(url);
-    const j = await r.json();
-    if (j.length > 0) {
-      return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
+    if (map.getSource("noahHazard")) {
+      map.getSource("noahHazard").setData(geojson);
+    } else {
+      map.addSource("noahHazard", { type: "geojson", data: geojson });
+      map.addLayer({
+        id: "noahHazard-fill",
+        type: "fill",
+        source: "noahHazard",
+        paint: {
+          // use 'risk' property if present; fallback to a single color
+          "fill-color": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "risk"], 0],
+            0, "#ffffb2",
+            1, "#fecc5c",
+            2, "#fd8d3c",
+            3, "#f03b20"
+          ],
+          "fill-opacity": 0.35
+        }
+      });
+      map.addLayer({
+        id: "noahHazard-line",
+        type: "line",
+        source: "noahHazard",
+        paint: { "line-color": "#990000", "line-width": 1 }
+      });
+
+      // optional labels: show risk property if present
+      map.addLayer({
+        id: "noahHazard-labels",
+        type: "symbol",
+        source: "noahHazard",
+        layout: {
+          "text-field": ["coalesce", ["get", "label"], ["concat", ["to-string", ["coalesce", ["get", "risk"], 0]], " risk"]],
+          "text-size": 12,
+          "text-allow-overlap": false
+        },
+        paint: { "text-color": "#600000" }
+      });
     }
   } catch (e) {
-    console.warn("Geocode failed:", e);
+    console.warn("Failed to add NOAH hazard layer:", e);
   }
+}
 
+/* -------------------------
+   Proxies: fetch NOAH and AccuWeather via server endpoints (if available)
+   ------------------------- */
+async function fetchNoahGeojsonProxy() {
+  try {
+    const r = await fetch(NOAH_GEOJSON_PROXY, { headers: { "Accept": "application/json" } });
+    if (!r.ok) throw new Error(`Proxy returned ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    console.warn("NOAH proxy fetch error:", e);
+    return null;
+  }
+}
+
+async function fetchAccuWeatherProxy(lat, lng) {
+  try {
+    // call serverless endpoint; server should return { locationKey, current: {...} }
+    const url = `${ACCUWEATHER_PROXY}?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`;
+    const r = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!r.ok) throw new Error(`Accu proxy ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    console.warn("Accu proxy fetch failed:", e);
+    return null;
+  }
+}
+
+/* -------------------------
+   Geocoding (Nominatim fallback)
+   ------------------------- */
+async function resolveLocation(text) {
+  if (!text) return null;
+  const parts = text.split(",").map(s => s.trim());
+  if (parts.length === 2) {
+    const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
+    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+  }
+  // Nominatim search (rate-limited)
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}`;
+    const r = await safeFetchJSON(url);
+    if (Array.isArray(r) && r.length > 0) return { lat: parseFloat(r[0].lat), lng: parseFloat(r[0].lon) };
+  } catch (e) {
+    console.warn("Nominatim geocode failed:", e);
+  }
   return null;
 }
 
-/* ============================================================
-   9. Request OSRM route
-   ============================================================ */
-async function getOSRMRoute(o, d) {
-  const coords = `${o.lng},${o.lat};${d.lng},${d.lat}`;
+/* -------------------------
+   OSRM routing request
+   ------------------------- */
+async function requestOSRMRoute(origin, destination) {
+  const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
   const url = `${OSRM_SERVER}/route/v1/driving/${coords}?overview=full&alternatives=true&geometries=geojson`;
-
   const r = await fetch(url);
-  if (!r.ok) throw new Error("OSRM request failed");
+  if (!r.ok) throw new Error(`OSRM ${r.status}`);
   return await r.json();
 }
 
-/* ============================================================
-   10. Draw a route
-   ============================================================ */
-function drawRoute(geojson, id) {
-  const src = `r-src-${id}`;
-  const line = `r-line-${id}`;
+/* -------------------------
+   Scoring: combine learned + NOAH feature + AccuWeather
+   - learned: FloodLearner average over sampled points
+   - noahRisk: if NOAH polygons present, compute intersection count or co-locate sample -> simplified here
+   - weather: fetch AccuWeather via proxy at midpoint, derive rainScore & alertScore
+   ------------------------- */
+function sampleCoordsFromGeojson(geojson, maxSamples = 30) {
+  if (!geojson || !geojson.coordinates) return [];
+  const coords = geojson.coordinates;
+  const step = Math.max(1, Math.floor(coords.length / maxSamples));
+  const out = [];
+  for (let i = 0; i < coords.length; i += step) {
+    const [lng, lat] = coords[i];
+    out.push({ lat, lng });
+  }
+  return out;
+}
 
-  if (map.getLayer(line)) map.removeLayer(line);
-  if (map.getSource(src)) map.removeSource(src);
+// compute learned average
+function computeLearnedScore(geojson) {
+  const samples = sampleCoordsFromGeojson(geojson, 30);
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  samples.forEach(p => { sum += FloodLearner.score(p.lat, p.lng); });
+  return sum / samples.length;
+}
 
-  map.addSource(src, { type: "geojson", data: geojson });
-
-  map.addLayer({
-    id: line,
-    type: "line",
-    source: src,
-    paint: {
-      "line-color": "#007cbf",
-      "line-width": id === "best" ? 6 : 3,
-      "line-opacity": id === "best" ? 1.0 : 0.5
+// optionally compute NOAH polygon overlap score by sampling points and checking if they fall within a hazard feature
+// (lightweight client-side approach: use map.queryRenderedFeatures if the noahHazard source/layer exists)
+function computeNoahScore(geojson) {
+  if (!map || !map.getSource || !map.getLayer) return 0;
+  if (!map.getSource("noahHazard")) return 0;
+  const samples = sampleCoordsFromGeojson(geojson, 20);
+  let hits = 0;
+  samples.forEach(p => {
+    // queryRenderedFeatures expects [point] in pixel coordinates; we can use map.queryRenderedFeatures with bbox small around point
+    try {
+      const bbox = [
+        map.project([p.lng - 0.0001, p.lat - 0.0001]),
+        map.project([p.lng + 0.0001, p.lat + 0.0001])
+      ];
+      const features = map.queryRenderedFeatures([bbox[0], bbox[1]], { layers: ["noahHazard-fill", "noahHazard-line"] });
+      if (features && features.length > 0) hits++;
+    } catch (e) {
+      // ignore
     }
   });
+  // return normalized hit rate
+  return samples.length > 0 ? hits / samples.length : 0;
 }
 
-/* ============================================================
-   11. Score route by local flood grid
-   ============================================================ */
-function scoreRoute(geojson) {
-  let total = 0;
-  let c = 0;
-
-  const pts = geojson.coordinates;
-  const step = Math.max(1, Math.floor(pts.length / 30));
-
-  for (let i = 0; i < pts.length; i += step) {
-    const [lng, lat] = pts[i];
-    total += FloodLearner.score(lat, lng);
-    c++;
-  }
-
-  return c > 0 ? total / c : 0;
+// fetch weather for a sample point and compute a small score
+async function computeWeatherScoreForPoint(lat, lng) {
+  const accu = await fetchAccuWeatherProxy(lat, lng);
+  if (!accu || !accu.current) return { rainScore: 0, alertScore: 0, raw: null };
+  const cur = accu.current;
+  // sample fields (AccuWeather's schema may differ; adapt as needed)
+  // HasPrecipitation, PrecipitationSummary.PastHour.Metric.Value
+  const pastHour = cur.PrecipitationSummary && cur.PrecipitationSummary.PastHour && cur.PrecipitationSummary.PastHour.Metric && cur.PrecipitationSummary.PastHour.Metric.Value;
+  const rainMM = pastHour ? Number(pastHour) : 0;
+  const rainScore = Math.min(10, rainMM); // simple clamp
+  let alertScore = 0;
+  if (cur.WeatherText && /thunderstorm|tornado|flood|severe/i.test(cur.WeatherText)) alertScore = 5;
+  return { rainScore, alertScore, raw: cur };
 }
 
-/* ============================================================
-   12. Main routing handler
-   ============================================================ */
+// combined scoring for a route geometry (async)
+async function scoreRouteCombinedAsync(geojson) {
+  // learned
+  const learned = computeLearnedScore(geojson); // avg count
+  // noah
+  const noah = computeNoahScore(geojson); // 0..1
+  // weather: sample midpoint
+  const coords = geojson.coordinates;
+  const midIdx = Math.floor(coords.length / 2);
+  const [midLng, midLat] = coords[midIdx] || coords[0];
+  let weather = { rainScore: 0, alertScore: 0, raw: null };
+  try {
+    weather = await computeWeatherScoreForPoint(midLat, midLng);
+  } catch (e) { console.warn("Weather score failed:", e); }
+
+  // combine with weights (tunable)
+  const wLearned = 1.0;        // per-count weight
+  const wNoah = 3.0;          // noah presence heavy weight
+  const wRain = 0.2;          // rain mm scaling
+  const wAlert = 2.0;         // alert importance
+
+  // normalize noah (0..1) to 0..3
+  const noahNorm = noah * 3.0;
+
+  const combined = (wLearned * learned) + (wNoah * noahNorm) + (wRain * weather.rainScore) + (wAlert * weather.alertScore);
+  return { combined, breakdown: { learned, noah, weather } };
+}
+
+/* -------------------------
+   Draw/clear routes (helpers)
+   ------------------------- */
+let drawnRouteIds = [];
+function clearRoutes() {
+  drawnRouteIds.forEach(id => {
+    try {
+      if (map.getLayer(id)) map.removeLayer(id);
+      if (map.getSource(id)) map.removeSource(id);
+    } catch (e) {}
+  });
+  drawnRouteIds = [];
+}
+
+function drawGeojsonRoute(geojson, idSuffix, isBest=false) {
+  const srcId = `route-src-${idSuffix}`;
+  const lineId = `route-line-${idSuffix}`;
+  // cleanup if exists
+  if (map.getLayer(lineId)) map.removeLayer(lineId);
+  if (map.getSource(srcId)) map.removeSource(srcId);
+  map.addSource(srcId, { type: "geojson", data: geojson });
+  map.addLayer({
+    id: lineId,
+    type: "line",
+    source: srcId,
+    paint: {
+      "line-color": isBest ? "#007cbf" : "#888",
+      "line-width": isBest ? 6 : 3,
+      "line-opacity": isBest ? 0.95 : 0.5
+    }
+  });
+  drawnRouteIds.push(lineId);
+}
+
+/* -------------------------
+   Main routing flow (async)
+   ------------------------- */
 async function handleRouting() {
-  const textO = document.getElementById("origin").value;
-  const textD = document.getElementById("destination").value;
+  setStatus("Resolving origin & destination...");
+  const originText = document.getElementById("origin").value;
+  const destText = document.getElementById("destination").value;
   const threshold = Number(document.getElementById("threshold").value) || 2;
 
-  setStatus("Resolving locations...");
-
-  const o = await resolveLocation(textO);
-  const d = await resolveLocation(textD);
-
-  if (!o || !d) {
-    setStatus("Failed to resolve origin or destination.");
-    return;
-  }
+  const o = await resolveLocation(originText);
+  const d = await resolveLocation(destText);
+  if (!o || !d) { setStatus("Could not resolve origin or destination. Use lat,lng or a valid address."); return; }
 
   setStatus("Requesting OSRM routes...");
-
   try {
-    const res = await getOSRMRoute(o, d);
-    if (!res.routes || res.routes.length === 0) {
-      setStatus("No routes returned.");
-      return;
-    }
+    const osrm = await requestOSRMRoute(o, d);
+    if (!osrm || !osrm.routes || osrm.routes.length === 0) { setStatus("No routes found."); return; }
 
-    let best = null;
-    let bestScore = Infinity;
-
-    res.routes.forEach((r, idx) => {
+    clearRoutes();
+    // evaluate all routes in parallel (scoreRouteCombinedAsync)
+    const evaluations = await Promise.all(osrm.routes.map(async (r, idx) => {
       const geo = r.geometry;
-      const sc = scoreRoute(geo);
+      const scoreObj = await scoreRouteCombinedAsync(geo);
+      return { idx, geo, score: scoreObj.combined, details: scoreObj.breakdown };
+    }));
 
-      drawRoute({ type: "Feature", geometry: geo }, "alt-" + idx);
+    // sort by score ascending (safer = lower)
+    evaluations.sort((a,b) => a.score - b.score);
 
-      if (sc < bestScore) {
-        bestScore = sc;
-        best = geo;
-      }
+    // draw alternatives and best
+    evaluations.forEach((ev, i) => {
+      drawGeojsonRoute({ type: "Feature", geometry: ev.geo }, `alt-${i}`, false);
     });
 
+    const best = evaluations[0];
     if (best) {
-      drawRoute({ type: "Feature", geometry: best }, "best");
-      setStatus(`Best route selected (risk ${bestScore.toFixed(2)}).`);
+      drawGeojsonRoute({ type: "Feature", geometry: best.geo }, `best`, true);
+      setStatus(`Best route selected (risk ${best.score.toFixed(2)}).`);
+      // popup with breakdown
+      const mid = best.geo.coordinates[Math.floor(best.geo.coordinates.length/2)];
+      const [lng, lat] = mid;
+      const popupHtml = `<strong>Route risk: ${best.score.toFixed(2)}</strong><br/>
+                         learned avg: ${best.details.learned.toFixed(2)}<br/>
+                         NOAH overlap: ${(best.details.noah*100).toFixed(1)}%<br/>
+                         weather sample rainScore: ${best.details.weather.rainScore} mm, alertScore: ${best.details.weather.alertScore}`;
+      new maplibregl.Popup({ offset: 12 }).setLngLat([lng, lat]).setHTML(popupHtml).addTo(map);
 
-      if (bestScore >= threshold) {
-        setStatus(`Warning: route risk ${bestScore.toFixed(2)} exceeds threshold.`);
+      if (best.score >= threshold) {
+        setStatus(`Warning: best route risk ${best.score.toFixed(2)} >= threshold ${threshold}. Consider detour.`);
       }
     }
+
   } catch (e) {
-    console.error(e);
-    setStatus("Routing failed.");
+    console.error("Routing flow error:", e);
+    setStatus("Routing failed (see console).");
   }
 }
 
-/* ============================================================
-   13. Wire UI events
-   ============================================================ */
+/* -------------------------
+   Wire UI & init
+   ------------------------- */
 function wireUI() {
-  document
-    .getElementById("route-form")
-    .addEventListener("submit", (e) => {
-      e.preventDefault();
-      handleRouting();
-    });
+  const form = document.getElementById("route-form");
+  if (form) form.addEventListener("submit", (ev) => { ev.preventDefault(); handleRouting(); });
 
-  document.getElementById("clear-memory").addEventListener("click", () => {
-    FloodLearner.clear();
-    setStatus("Local flood memory cleared.");
-  });
+  const clearBtn = document.getElementById("clear-memory");
+  if (clearBtn) clearBtn.addEventListener("click", () => { FloodLearner.clear(); setStatus("Local flood memory cleared."); clearRoutes(); });
 }
 
-/* ============================================================
-   14. Initialize everything
-   ============================================================ */
 window.addEventListener("load", () => {
   wireUI();
-  initMap();
-  setStatus("Map loading...");
+  initMap().catch(e => {
+    console.error("initMap failed:", e);
+    setStatus("Map initialization failed. See console.");
+    // show fallback panel with folder screenshot link for debugging
+    const mapEl = document.getElementById("map");
+    if (mapEl) {
+      mapEl.innerHTML = `<div class="map-fallback"><div class="box"><h3>Map failed to initialize</h3>
+        <p>Check console for errors. Folder screenshot (local):</p>
+        <a href="${FOLDER_SCREENSHOT_LOCAL}" target="_blank">Open folder screenshot</a>
+      </div></div>`;
+    }
+  });
 });
+
+/* -------------------------
+   Reused helpers (resolveLocation, requestOSRMRoute, safeFetchJSON)
+   These functions are expected to already be present in your code base from previous app.js.
+   If not present, they are included below for completeness.
+   ------------------------- */
+
+async function safeFetchJSON(url, opts={}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return await r.json();
+}
+
+async function resolveLocation(text) {
+  if (!text) return null;
+  const parts = text.split(",").map(s => s.trim());
+  if (parts.length === 2) {
+    const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
+    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+  }
+  // Nominatim lookup
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}`;
+    const arr = await safeFetchJSON(url);
+    if (Array.isArray(arr) && arr.length > 0) return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon) };
+  } catch (e) {
+    console.warn("Nominatim failed:", e);
+  }
+  return null;
+}
+
+async function requestOSRMRoute(origin, destination) {
+  const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
+  const url = `${OSRM_SERVER}/route/v1/driving/${coords}?overview=full&alternatives=true&geometries=geojson`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`OSRM ${r.status}`);
+  return await r.json();
+}
