@@ -26,6 +26,9 @@
     #map { flex: 1 1 auto; min-height: 0; height: 100%; }
     /* simple marker style (keeps existing app visuals) */
     .flood-marker { width: 12px; height: 12px; background: rgba(200,30,30,0.9); border-radius: 50%; border: 2px solid white; box-shadow: 0 0 3px rgba(0,0,0,0.3); }
+
+    /* user location marker */
+    .user-location-marker { width: 14px; height: 14px; background: #2b8cff; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(43,140,255,0.6); }
   </style>
 </head>
 <body>
@@ -36,7 +39,11 @@
 
       <form id="route-form">
         <label for="origin">Origin (lat,lng or address)</label>
-        <input id="origin" placeholder="e.g. 14.6760,121.0437 or Quezon City" />
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="origin" placeholder="e.g. 14.6760,121.0437 or Quezon City" style="flex:1" />
+          <!-- added: use current location button -->
+          <button id="loc-btn" type="button" title="Use current location">Use current location</button>
+        </div>
 
         <label for="destination">Destination (lat,lng or address)</label>
         <input id="destination" placeholder="e.g. 14.5547,121.0244 or Makati" />
@@ -54,6 +61,24 @@
 
       <div class="actions">
         <button id="clear-memory" type="button">Clear Local Flood Memory</button>
+      </div>
+
+      <hr />
+
+      <!-- Weather summary for origin & destination -->
+      <div class="weather-box">
+        <h3>Weather</h3>
+        <div id="weather-origin">Origin: <em>none</em></div>
+        <div id="weather-destination">Destination: <em>none</em></div>
+      </div>
+
+      <!-- Turn-by-turn directions -->
+      <div class="directions-box">
+        <h3>Directions</h3>
+        <div id="directions-wrap">
+          <div id="directions-summary"></div>
+          <ol id="directions"></ol>
+        </div>
       </div>
 
       <hr />

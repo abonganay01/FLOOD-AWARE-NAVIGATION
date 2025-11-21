@@ -58,6 +58,9 @@ function safeFetchJSON(url, opts = {}) {
 let map;
 let routeSources = [];
 
+// add state for user location marker
+let userLocationMarker = null;
+
 async function testNoahTileAvailability() {
   const testURL = NOAH_TILE_URL.replace("{z}", "10").replace("{x}", "865").replace("{y}", "512");
   try {
@@ -278,14 +281,73 @@ async function resolveLocation(text) {
 }
 
 /* -------------------------
-   OSRM routing request
+   OSRM routing request (request steps for turn-by-turn)
    ------------------------- */
 async function requestOSRMRoute(origin, destination) {
   const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
-  const url = `${OSRM_SERVER}/route/v1/driving/${coords}?overview=full&alternatives=true&geometries=geojson`;
+  // include steps=true so we can render turn-by-turn instructions
+  const url = `${OSRM_SERVER}/route/v1/driving/${coords}?overview=full&alternatives=true&geometries=geojson&steps=true`;
   const r = await fetch(url);
   if (!r.ok) throw new Error(`OSRM ${r.status}`);
   return await r.json();
+}
+
+/* -------------------------
+   Render directions & weather
+   ------------------------- */
+function renderDirections(route) {
+  const list = document.getElementById("directions");
+  const summary = document.getElementById("directions-summary");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!route || !route.legs || route.legs.length === 0) {
+    if (summary) summary.textContent = "";
+    list.innerHTML = "<li>No directions available</li>";
+    return;
+  }
+  // summary: total distance / duration (OSRM provides route.distance/duration on route object)
+  if (summary && typeof route.distance === "number" && typeof route.duration === "number") {
+    const km = (route.distance / 1000).toFixed(2);
+    const mins = Math.round(route.duration / 60);
+    summary.textContent = `Total: ${km} km · ${mins} min`;
+  } else if (summary) {
+    summary.textContent = "";
+  }
+
+  route.legs.forEach((leg) => {
+    leg.steps.forEach((step) => {
+      const li = document.createElement("li");
+      const m = step.maneuver || {};
+      const instrParts = [];
+      if (m.type) instrParts.push(m.type);
+      if (m.modifier) instrParts.push(m.modifier);
+      const instr = instrParts.join(" ");
+      const name = step.name || "";
+      const distM = Math.round(step.distance || 0);
+      li.textContent = `${instr}${name ? ' to ' + name : ''} — ${distM} m`;
+      list.appendChild(li);
+    });
+  });
+}
+
+async function renderWeatherForPoint(elId, lat, lng, label) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = `${label}: loading...`;
+  try {
+    const accu = await fetchAccuWeatherProxy(lat, lng);
+    if (!accu || !accu.current) {
+      el.textContent = `${label}: weather unavailable`;
+      return;
+    }
+    const cur = accu.current;
+    const precip = cur.PrecipitationSummary?.PastHour?.Metric?.Value ?? "N/A";
+    const unit = cur.PrecipitationSummary?.PastHour?.Metric?.Unit ?? "";
+    el.innerHTML = `<strong>${label}:</strong> ${cur.WeatherText || "N/A"} — Precip (1h): ${precip} ${unit}`;
+  } catch (e) {
+    console.warn("Weather render failed:", e);
+    el.textContent = `${label}: weather error`;
+  }
 }
 
 /* -------------------------
@@ -417,7 +479,7 @@ function drawGeojsonRoute(geojson, idSuffix, isBest=false) {
 }
 
 /* -------------------------
-   Main routing flow (async)
+   Main routing flow (async) — include route object in evaluation and render directions/weather
    ------------------------- */
 async function handleRouting() {
   setStatus("Resolving origin & destination...");
@@ -439,7 +501,7 @@ async function handleRouting() {
     const evaluations = await Promise.all(osrm.routes.map(async (r, idx) => {
       const geo = r.geometry;
       const scoreObj = await scoreRouteCombinedAsync(geo);
-      return { idx, geo, score: scoreObj.combined, details: scoreObj.breakdown };
+      return { idx, geo, score: scoreObj.combined, details: scoreObj.breakdown, route: r };
     }));
 
     // sort by score ascending (safer = lower)
@@ -454,6 +516,16 @@ async function handleRouting() {
     if (best) {
       drawGeojsonRoute({ type: "Feature", geometry: best.geo }, `best`, true);
       setStatus(`Best route selected (risk ${best.score.toFixed(2)}).`);
+
+      // show directions using the full OSRM route (contains legs/steps)
+      renderDirections(best.route);
+
+      // show weather for origin & destination (if proxy available)
+      await Promise.all([
+        renderWeatherForPoint("weather-origin", o.lat, o.lng, "Origin"),
+        renderWeatherForPoint("weather-destination", d.lat, d.lng, "Destination")
+      ]);
+
       // popup with breakdown
       const mid = best.geo.coordinates[Math.floor(best.geo.coordinates.length/2)];
       const [lng, lat] = mid;
@@ -475,14 +547,32 @@ async function handleRouting() {
 }
 
 /* -------------------------
-   Wire UI & init
+   Wire UI & init — clear weather/directions when clearing memory
    ------------------------- */
 function wireUI() {
   const form = document.getElementById("route-form");
   if (form) form.addEventListener("submit", (ev) => { ev.preventDefault(); handleRouting(); });
 
   const clearBtn = document.getElementById("clear-memory");
-  if (clearBtn) clearBtn.addEventListener("click", () => { FloodLearner.clear(); setStatus("Local flood memory cleared."); clearRoutes(); });
+  if (clearBtn) clearBtn.addEventListener("click", () => {
+    FloodLearner.clear();
+    setStatus("Local flood memory cleared.");
+    clearRoutes();
+    const directions = document.getElementById("directions");
+    const summary = document.getElementById("directions-summary");
+    const w1 = document.getElementById("weather-origin");
+    const w2 = document.getElementById("weather-destination");
+    if (directions) directions.innerHTML = "";
+    if (summary) summary.textContent = "";
+    if (w1) w1.innerHTML = "Origin: <em>none</em>";
+    if (w2) w2.innerHTML = "Destination: <em>none</em>";
+    // remove user marker if present
+    try { if (userLocationMarker) { userLocationMarker.remove(); userLocationMarker = null; } } catch(e){}
+  });
+
+  // wire current location button
+  const locBtn = document.getElementById("loc-btn");
+  if (locBtn) locBtn.addEventListener("click", (ev) => { ev.preventDefault(); detectCurrentLocation(); });
 }
 
 // window load wiring and init (unchanged)
