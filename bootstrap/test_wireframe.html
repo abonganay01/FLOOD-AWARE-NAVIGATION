@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Flood-Aware Navigation – Wireframe</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Bootstrap 5 CSS -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    /* Generic wireframe box */
+    .wf-box {
+      background: #e9ecef;
+      border: 1px solid #b0b0b0;
+      padding: 0.75rem;
+      position: relative;
+      margin-bottom: 0.75rem;
+    }
+
+    /* For big “image-like” areas with X cross lines (map, hero, etc.) */
+    .wf-image {
+      min-height: 220px;
+      background: #e9ecef;
+      border: 1px solid #b0b0b0;
+      position: relative;
+      margin-bottom: 0.75rem;
+    }
+    .wf-image::before,
+    .wf-image::after {
+      content: "";
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      left: 8px;
+      right: 8px;
+      border-top: 1px solid #b0b0b0;
+      transform-origin: center;
+    }
+    .wf-image::before {
+      transform: rotate(45deg);
+    }
+    .wf-image::after {
+      transform: rotate(-45deg);
+    }
+
+    /* Red labels like in the guide (Step 3: markup) */
+    .wf-label {
+      position: absolute;
+      top: 2px;
+      left: 6px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #d9534f; /* red */
+      background: rgba(248, 249, 250, 0.9);
+      padding: 0 4px;
+    }
+
+    .wf-label-inline {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #d9534f;
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+
+    /* Logo circle like their example (circle with 'L') */
+    .wf-logo-circle {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 2px solid #b0b0b0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      background: #e9ecef;
+      margin-bottom: 0.25rem;
+    }
+
+    /* Navigation placeholders */
+    .wf-nav-menu {
+      display: flex;
+      gap: 0.25rem;
+      flex-wrap: wrap;
+    }
+    .wf-nav-item {
+      flex: 0 0 auto;
+      min-width: 70px;
+      padding: 0.25rem 0.5rem;
+      border: 1px solid #b0b0b0;
+      text-align: center;
+      font-size: 0.8rem;
+      background: #f5f5f5;
+    }
+    .wf-nav-item.active {
+      background: #dcdcdc; /* shaded current page */
+    }
+
+    /* Simple placeholders for inputs, buttons, etc. */
+    .wf-input,
+    .wf-button,
+    .wf-checkbox,
+    .wf-dropdown,
+    .wf-textarea {
+      background: #f5f5f5;
+      border: 1px solid #b0b0b0;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.8rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .wf-button {
+      text-align: center;
+    }
+
+    .wf-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .wf-text-lines {
+      height: 80px;
+      background: repeating-linear-gradient(
+        to bottom,
+        #f5f5f5,
+        #f5f5f5 4px,
+        #e0e0e0 5px
+      );
+      border: 1px solid #b0b0b0;
+    }
+
+    /* Map height on larger screens */
+    #map-wireframe {
+      min-height: 340px;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid #ddd;
+      background: #f8f9fa;
+    }
+
+    /* Extra for Features/Contact/Responsive sections */
+
+    /* CTA as rectangle with cross */
+    .wf-cta {
+      position: relative;
+      background: #f5f5f5;
+      border: 1px solid #b0b0b0;
+      height: 45px;
+      margin-bottom: 0.5rem;
+    }
+    .wf-cta::before,
+    .wf-cta::after {
+      content: "";
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      left: 4px;
+      right: 4px;
+      border-top: 1px solid #b0b0b0;
+      transform-origin: center;
+    }
+    .wf-cta::before { transform: rotate(45deg); }
+    .wf-cta::after { transform: rotate(-45deg); }
+
+    /* Page title bar */
+    .wf-page-title {
+      background: #e0e0e0;
+      border: 1px solid #b0b0b0;
+      padding: 0.6rem;
+      position: relative;
+      margin-bottom: 1rem;
+    }
+
+    /* Mobile preview frame */
+    .mobile-frame {
+      max-width: 360px;
+      border: 2px solid #b0b0b0;
+      border-radius: 18px;
+      padding: 0.75rem;
+      margin: 0 auto 2rem;
+      background: #ffffff;
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ====================== HEADER / NAVBAR (WIREFRAME) ====================== -->
+<header class="container-fluid py-3 border-bottom bg-white">
+  <div class="row align-items-center">
+    <!-- Logo -->
+    <div class="col-3 col-md-2 col-lg-1 text-center text-md-start">
+      <span class="wf-label-inline">Logo</span>
+      <div class="wf-logo-circle">L</div>
+    </div>
+
+    <!-- Navigation Menu -->
+    <div class="col-9 col-md-7 col-lg-8">
+      <span class="wf-label-inline">Navigation Menu</span>
+      <div class="wf-nav-menu">
+        <div class="wf-nav-item active">Home / Map</div>
+        <div class="wf-nav-item">Flood Reports</div>
+        <div class="wf-nav-item">Routes</div>
+        <div class="wf-nav-item">Settings</div>
+        <div class="wf-nav-item">Help</div>
+        <div class="wf-nav-item">About</div>
+      </div>
+    </div>
+
+    <!-- Primary Action Button (Report Flood) -->
+    <div class="col-12 col-md-3 col-lg-3 mt-3 mt-md-0 text-md-end">
+      <span class="wf-label-inline">Primary Call to Action</span>
+      <div class="wf-button">[Report Flood Button]</div>
+    </div>
+  </div>
+</header>
+
+<!-- ====================== MAIN CONTENT (HOME / MAP) ====================== -->
+<main class="container-fluid mt-3">
+  <div class="row g-3">
+    <!-- LEFT COLUMN: ROUTE PLANNER + LEGEND -->
+    <section class="col-12 col-lg-4">
+      <!-- Route Planner Card -->
+      <div class="wf-box">
+        <span class="wf-label">Route Planner Panel</span>
+
+        <p class="mb-2 fw-semibold">ROUTE PLANNER</p>
+
+        <!-- Start -->
+        <div class="mb-2">
+          <span class="wf-label-inline">Start Location Input</span>
+          <div class="wf-input">[Input: Start (Address or Lat,Lng)]</div>
+        </div>
+
+        <!-- Destination -->
+        <div class="mb-2">
+          <span class="wf-label-inline">Destination Input</span>
+          <div class="wf-input">[Input: Destination]</div>
+        </div>
+
+        <!-- Options (checkboxes) -->
+        <div class="mb-2">
+          <span class="wf-label-inline">Routing & Flood Options</span>
+          <div class="wf-checkbox">
+            <div style="width:14px;height:14px;border:1px solid #777;"></div>
+            <span> Avoid flooded roads</span>
+          </div>
+          <div class="wf-checkbox">
+            <div style="width:14px;height:14px;border:1px solid #777;"></div>
+            <span> Prefer safe alternative routes</span>
+          </div>
+        </div>
+
+        <!-- Flood Risk Source -->
+        <div class="mb-2">
+          <span class="wf-label-inline">Flood Risk Source Dropdown</span>
+          <div class="wf-dropdown">[Dropdown: NOAH / AccuWeather / Combined]</div>
+        </div>
+
+        <!-- Buttons -->
+        <div class="mb-1">
+          <span class="wf-label-inline">Route Actions (Buttons)</span>
+          <div class="wf-button mb-1">[Button: Get Flood-Aware Route]</div>
+          <div class="wf-button mb-1">[Button: Clear Route & Markers]</div>
+          <div class="wf-button">[Button: Use My Location as Start]</div>
+        </div>
+      </div>
+
+      <!-- Flood Legend Card -->
+      <div class="wf-box">
+        <span class="wf-label">Flood Legend Panel</span>
+        <p class="mb-2 fw-semibold">FLOOD LEGEND</p>
+
+        <div class="mb-1">
+          <span class="wf-label-inline">Flood Level Indicators</span>
+          <div class="wf-text-lines" style="height:60px;">
+            <!-- Just lines representing legend entries -->
+          </div>
+        </div>
+
+        <div class="mt-1 small text-muted">
+          (Explain low / moderate / severe flood levels here)
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT COLUMN: MAP AREA -->
+    <section class="col-12 col-lg-8">
+      <div id="map-wireframe" class="wf-image d-flex align-items-center justify-content-center">
+        <span class="wf-label">Map Area</span>
+        <div class="text-center">
+          <div class="fw-semibold mb-1">MAP AREA (INTERACTIVE)</div>
+          <div class="small text-muted">
+            MapLibre / Leaflet Map showing route and flood overlays
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- BOTTOM ROW: ROUTE SUMMARY + SYSTEM MESSAGES -->
+  <div class="row g-3 mt-2">
+    <!-- Route Summary -->
+    <section class="col-12 col-lg-8">
+      <div class="wf-box">
+        <span class="wf-label">Route Summary Section</span>
+        <p class="mb-2 fw-semibold">ROUTE SUMMARY</p>
+
+        <span class="wf-label-inline">Route Details Text</span>
+        <div class="wf-text-lines">
+          <!-- multiple lines to represent text -->
+        </div>
+        <div class="mt-1 small text-muted">
+          (Distance, duration, warnings about flooded segments, etc.)
+        </div>
+      </div>
+    </section>
+
+    <!-- System Messages -->
+    <section class="col-12 col-lg-4">
+      <div class="wf-box">
+        <span class="wf-label">System Messages Section</span>
+        <p class="mb-2 fw-semibold">SYSTEM MESSAGES</p>
+
+        <span class="wf-label-inline">Alerts & Notifications</span>
+        <div class="wf-text-lines" style="height:100px;">
+          <!-- lines to represent alert list -->
+        </div>
+        <div class="mt-1 small text-muted">
+          (Connection status, API errors, flood data updates, etc.)
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- ====================== FOOTER ====================== -->
+<footer class="mt-4 py-3 text-center">
+  <div class="container">
+    <span class="wf-label-inline">Footer</span>
+    <div class="wf-box mb-0">
+      <span class="wf-label">Footer Content</span>
+      <div class="small">
+        Logo · Contact info · Links · Copyright ·
+        Thesis / Project details
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- ====================== MODAL WIREFRAMES ====================== -->
+<div class="container my-4">
+  <h6 class="text-muted text-uppercase mb-2">Modal Wireframes (for documentation)</h6>
+  <div class="row g-3">
+    <!-- Report Flood Modal -->
+    <section class="col-12 col-md-6">
+      <div class="wf-box">
+        <span class="wf-label">Report Flood Modal</span>
+        <p class="mb-2 fw-semibold">REPORT FLOOD MODAL (OVERLAY)</p>
+
+        <div class="mb-2">
+          <span class="wf-label-inline">Latitude Input</span>
+          <div class="wf-input">[Input: Latitude]</div>
+        </div>
+        <div class="mb-2">
+          <span class="wf-label-inline">Longitude Input</span>
+          <div class="wf-input">[Input: Longitude]</div>
+        </div>
+        <div class="mb-2">
+          <span class="wf-label-inline">Severity Dropdown</span>
+          <div class="wf-dropdown">[Dropdown: Low / Moderate / Severe]</div>
+        </div>
+        <div class="mb-2">
+          <span class="wf-label-inline">Notes Textarea</span>
+          <div class="wf-textarea" style="height:70px;">[Textarea: Notes]</div>
+        </div>
+
+        <div class="mb-0">
+          <span class="wf-label-inline">Modal Actions</span>
+          <div class="wf-button mb-1">[Button: Cancel]</div>
+          <div class="wf-button">[Button: Save Flood Report]</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Help / About Modal -->
+    <section class="col-12 col-md-6">
+      <div class="wf-box">
+        <span class="wf-label">Help / About Modal</span>
+        <p class="mb-2 fw-semibold">HELP / ABOUT MODAL</p>
+
+        <span class="wf-label-inline">Instruction Text</span>
+        <div class="wf-text-lines" style="height:90px;"></div>
+
+        <div class="mt-2">
+          <span class="wf-label-inline">Modal Actions</span>
+          <div class="wf-button">[Button: Close]</div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ====================== FEATURES PAGE WIREFRAME ====================== -->
+<div class="container my-5">
+  <h4 class="mb-3">Features Page Wireframe (Flood-Aware System)</h4>
+
+  <!-- Header reused -->
+  <header class="border-bottom pb-3 mb-3">
+    <div class="row align-items-center">
+      <div class="col-3 col-md-2 col-lg-1 text-center text-md-start">
+        <span class="wf-label-inline">Logo</span>
+        <div class="wf-logo-circle">L</div>
+      </div>
+      <div class="col-9 col-md-7 col-lg-8">
+        <span class="wf-label-inline">Navigation Menu</span>
+        <div class="wf-nav-menu">
+          <div class="wf-nav-item">Home / Map</div>
+          <div class="wf-nav-item active">Features</div>
+          <div class="wf-nav-item">Flood Reports</div>
+          <div class="wf-nav-item">Contact</div>
+        </div>
+      </div>
+      <div class="col-12 col-md-3 col-lg-3 mt-3 mt-md-0 text-md-end">
+        <span class="wf-label-inline">Call to Action</span>
+        <div class="wf-cta"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Page title -->
+  <div class="wf-page-title">
+    <span class="wf-label">Page Title</span>
+    <div class="small">Page Title: “System Features”</div>
+  </div>
+
+  <!-- Feature blocks -->
+  <div class="row align-items-center mb-3">
+    <div class="col-md-5">
+      <div class="wf-image" style="min-height:150px;">
+        <span class="wf-label">Feature Image – Flood-Aware Routing</span>
+      </div>
+    </div>
+    <div class="col-md-7">
+      <span class="wf-label-inline">Feature: Flood-Aware Route Planning</span>
+      <div class="wf-text-lines" style="height:60px;"></div>
+      <div class="wf-cta mt-2"></div>
+    </div>
+  </div>
+
+  <div class="row align-items-center mb-3">
+    <div class="col-md-7 order-2 order-md-1">
+      <span class="wf-label-inline">Feature: User Flood Reporting</span>
+      <div class="wf-text-lines" style="height:60px;"></div>
+      <div class="wf-cta mt-2"></div>
+    </div>
+    <div class="col-md-5 order-1 order-md-2">
+      <div class="wf-image" style="min-height:150px;">
+        <span class="wf-label">Feature Image – User Reports</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="row align-items-center mb-3">
+    <div class="col-md-5">
+      <div class="wf-image" style="min-height:150px;">
+        <span class="wf-label">Feature Image – NOAH / AccuWeather</span>
+      </div>
+    </div>
+    <div class="col-md-7">
+      <span class="wf-label-inline">Feature: Data Source Integration</span>
+      <div class="wf-text-lines" style="height:60px;"></div>
+      <div class="wf-cta mt-2"></div>
+    </div>
+  </div>
+
+  <!-- Footer reused -->
+  <footer class="border-top pt-3 mt-3">
+    <span class="wf-label-inline">Footer</span>
+    <div class="row">
+      <div class="col-md-3">
+        <div class="wf-box">
+          <span class="wf-label">Footer Logo</span>
+          <div class="wf-logo-circle">L</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="wf-box">
+          <span class="wf-label">Contact Info</span>
+          <div class="wf-text-lines" style="height:60px;"></div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="wf-box">
+          <span class="wf-label">Map & Features Links</span>
+          <div class="wf-text-lines" style="height:60px;"></div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="wf-box">
+          <span class="wf-label">Social / Docs / GitHub</span>
+          <div class="wf-text-lines" style="height:60px;"></div>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- ====================== CONTACT PAGE WIREFRAME ====================== -->
+<div class="container my-5">
+  <h4 class="mb-3">Contact Page Wireframe</h4>
+
+  <!-- Header reused -->
+  <header class="border-bottom pb-3 mb-3">
+    <div class="row align-items-center">
+      <div class="col-3 col-md-2 col-lg-1 text-center text-md-start">
+        <span class="wf-label-inline">Logo</span>
+        <div class="wf-logo-circle">L</div>
+      </div>
+      <div class="col-9 col-md-7 col-lg-8">
+        <span class="wf-label-inline">Navigation Menu</span>
+        <div class="wf-nav-menu">
+          <div class="wf-nav-item">Home / Map</div>
+          <div class="wf-nav-item">Features</div>
+          <div class="wf-nav-item active">Contact</div>
+        </div>
+      </div>
+      <div class="col-12 col-md-3 col-lg-3 mt-3 mt-md-0 text-md-end">
+        <span class="wf-label-inline">Call to Action</span>
+        <div class="wf-cta"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Page title -->
+  <div class="wf-page-title">
+    <span class="wf-label">Page Title</span>
+    <div class="small">Page Title: “Contact the Flood-Aware Navigation Team”</div>
+  </div>
+
+  <!-- Contact section -->
+  <div class="row mb-3">
+    <!-- Contact Form -->
+    <div class="col-md-6">
+      <span class="wf-label-inline">Contact Form</span>
+      <div class="wf-box">
+        <span class="wf-label">Contact Form</span>
+        <div class="wf-input"></div>
+        <div class="wf-input"></div>
+        <div class="wf-input"></div>
+        <div class="wf-textarea" style="height:60px;"></div>
+        <div class="wf-cta mt-2"></div>
+      </div>
+
+      <!-- Phone & Email -->
+      <div class="wf-box">
+        <span class="wf-label">Phone & Email</span>
+        <div class="d-flex align-items-center mb-1">
+          <div style="width:18px;height:18px;border-radius:50%;border:1px solid #777;margin-right:6px;"></div>
+          <div class="wf-input" style="flex:1;">Support Phone Number</div>
+        </div>
+        <div class="d-flex align-items-center">
+          <div style="width:18px;height:18px;border-radius:4px;border:1px solid #777;margin-right:6px;"></div>
+          <div class="wf-input" style="flex:1;">Support Email Address</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div class="col-md-6">
+      <span class="wf-label-inline">Service Area / Campus Map</span>
+      <div class="wf-image" style="min-height:220px;">
+        <span class="wf-label">Map Placeholder</span>
+      </div>
+      <div class="small text-muted">
+        Shows the lab / campus / city where system is deployed.
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer reused -->
+  <footer class="border-top pt-3 mt-3">
+    <span class="wf-label-inline">Footer</span>
+    <div class="row">
+      <div class="col-md-3">
+        <div class="wf-box">
+          <span class="wf-label">Footer Logo</span>
+          <div class="wf-logo-circle">L</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="wf-box">
+          <span class="wf-label">Contact Info</span>
+          <div class="wf-text-lines" style="height:60px;"></div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="wf-box">
+          <span class="wf-label">Support Links</span>
+          <div class="wf-text-lines" style="height:60px;"></div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="wf-box">
+          <span class="wf-label">Social & Project Links</span>
+          <div class="wf-text-lines" style="height:60px;"></div>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- ====================== RESPONSIVE (MOBILE) HOMEPAGE ====================== -->
+<div class="container my-5">
+  <h4 class="mb-3">Responsive (Mobile) Homepage Wireframe</h4>
+  <div class="mobile-frame">
+    <span class="wf-label">Mobile Home Layout</span>
+
+    <!-- Logo + small slider background -->
+    <div class="mb-3 text-center">
+      <span class="wf-label-inline">Logo + Slider Background</span>
+      <div class="wf-image" style="min-height:80px;"></div>
+      <div class="wf-logo-circle mx-auto mt-n4">L</div>
+    </div>
+
+    <!-- Intro -->
+    <div class="mb-2">
+      <span class="wf-label-inline">Intro – Flood-Aware Navigation</span>
+      <div class="wf-text-lines" style="height:60px;"></div>
+    </div>
+
+    <!-- CTA -->
+    <div class="mb-2">
+      <span class="wf-label-inline">Primary CTA – Open Map</span>
+      <div class="wf-cta"></div>
+    </div>
+
+    <!-- Features -->
+    <div class="mb-2">
+      <span class="wf-label-inline">Key Features (Stacked)</span>
+      <div class="wf-image" style="min-height:60px;"></div>
+      <div class="wf-image" style="min-height:60px;"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="mb-0">
+      <span class="wf-label-inline">Footer</span>
+      <div class="wf-text-lines" style="height:50px;"></div>
+    </div>
+  </div>
+  <p class="small text-muted mt-2">
+    On mobile, rows/columns collapse; width shrinks and sections stack vertically with more scroll height.
+  </p>
+</div>
+
+<!-- Bootstrap JS (for completeness) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

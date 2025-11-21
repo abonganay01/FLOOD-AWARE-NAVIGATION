@@ -15,14 +15,15 @@ console.log("app.js (with AccuWeather + NOAH proxy support) loaded.");
    ------------------------- */
 const NOAH_TILE_URL = "https://noah.up.edu.ph/api/tiles/{z}/{x}/{y}.png";
 const NOAH_GEOJSON_DIRECT = "https://noah.up.edu.ph/api/flood-geojson.json";
-const NOAH_GEOJSON_PROXY = "/api/noah"; // serverless proxy (recommended)
-const ACCUWEATHER_PROXY = "/api/accuweather"; // serverless proxy: /api/accuweather?lat=..&lng=..
+// prefer relative API proxy so it resolves with repo subpaths (GitHub Pages) or root deployments (Vercel)
+const NOAH_GEOJSON_PROXY = "api/noah"; // try relative first, fallback to absolute "/" variant in fetch helper
+const ACCUWEATHER_PROXY = "api/accuweather"; // same for AccuWeather proxy
 const CARTO_STYLE = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json";
 const MAPLIBRE_DEMO = "https://demotiles.maplibre.org/style.json";
 const OSRM_SERVER = "https://router.project-osrm.org"; // public demo server
 
 // local developer screenshot path (from uploaded files)
-const FOLDER_SCREENSHOT_LOCAL = "file:///mnt/data/d5f06fea-e14b-42ea-bbf4-41e4e35224db.png";
+const FOLDER_SCREENSHOT_LOCAL = ""; // removed local file:// usage for deployment safety
 
 /* -------------------------
    FloodLearner (same shim)
@@ -217,28 +218,42 @@ function addNoahHazardLayer(geojson) {
 /* -------------------------
    Proxies: fetch NOAH and AccuWeather via server endpoints (if available)
    ------------------------- */
+/* updated proxy helpers: try relative then absolute (/api/...) so app works from subpath or root */
 async function fetchNoahGeojsonProxy() {
-  try {
-    const r = await fetch(NOAH_GEOJSON_PROXY, { headers: { "Accept": "application/json" } });
-    if (!r.ok) throw new Error(`Proxy returned ${r.status}`);
-    return await r.json();
-  } catch (e) {
-    console.warn("NOAH proxy fetch error:", e);
-    return null;
+  const candidates = [ NOAH_GEOJSON_PROXY, (NOAH_GEOJSON_PROXY.startsWith("/") ? null : "/" + NOAH_GEOJSON_PROXY) ].filter(Boolean);
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url, { headers: { "Accept": "application/json" } });
+      if (!r.ok) {
+        // 404/403/etc -> try next candidate
+        console.warn(`NOAH proxy candidate ${url} returned ${r.status}`);
+        continue;
+      }
+      return await r.json();
+    } catch (e) {
+      console.warn(`NOAH proxy candidate ${url} failed:`, e);
+    }
   }
+  return null;
 }
 
 async function fetchAccuWeatherProxy(lat, lng) {
-  try {
-    // call serverless endpoint; server should return { locationKey, current: {...} }
-    const url = `${ACCUWEATHER_PROXY}?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`;
-    const r = await fetch(url, { headers: { "Accept": "application/json" } });
-    if (!r.ok) throw new Error(`Accu proxy ${r.status}`);
-    return await r.json();
-  } catch (e) {
-    console.warn("Accu proxy fetch failed:", e);
-    return null;
+  const q = `?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`;
+  const candidates = [ ACCUWEATHER_PROXY + q, (ACCUWEATHER_PROXY.startsWith("/") ? null : "/" + ACCUWEATHER_PROXY + q) ].filter(Boolean);
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url, { headers: { "Accept": "application/json" } });
+      if (!r.ok) {
+        console.warn(`Accu proxy candidate ${url} returned ${r.status}`);
+        continue;
+      }
+      return await r.json();
+    } catch (e) {
+      console.warn(`Accu proxy candidate ${url} failed:`, e);
+    }
   }
+  // no proxy available — return null and let the caller handle missing weather gracefully
+  return null;
 }
 
 /* -------------------------
@@ -470,56 +485,24 @@ function wireUI() {
   if (clearBtn) clearBtn.addEventListener("click", () => { FloodLearner.clear(); setStatus("Local flood memory cleared."); clearRoutes(); });
 }
 
+// window load wiring and init (unchanged)
 window.addEventListener("load", () => {
   wireUI();
   initMap().catch(e => {
     console.error("initMap failed:", e);
     setStatus("Map initialization failed. See console.");
-    // show fallback panel with folder screenshot link for debugging
     const mapEl = document.getElementById("map");
     if (mapEl) {
       mapEl.innerHTML = `<div class="map-fallback"><div class="box"><h3>Map failed to initialize</h3>
-        <p>Check console for errors. Folder screenshot (local):</p>
-        <a href="${FOLDER_SCREENSHOT_LOCAL}" target="_blank">Open folder screenshot</a>
+        <p>Check the browser console for errors. If you deployed to GitHub Pages, note that serverless /api endpoints (used for proxies) are not available — deploy to Vercel for full functionality.</p>
       </div></div>`;
     }
   });
 });
 
 /* -------------------------
-   Reused helpers (resolveLocation, requestOSRMRoute, safeFetchJSON)
-   These functions are expected to already be present in your code base from previous app.js.
-   If not present, they are included below for completeness.
+   NOTE: removed duplicated helper declarations that previously appeared below.
+   The helpers safeFetchJSON, resolveLocation and requestOSRMRoute are defined once earlier in this file.
+   Duplicate declarations in a module scope could cause initialization errors; removing them fixes map loading.
    ------------------------- */
-
-async function safeFetchJSON(url, opts={}) {
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return await r.json();
-}
-
-async function resolveLocation(text) {
-  if (!text) return null;
-  const parts = text.split(",").map(s => s.trim());
-  if (parts.length === 2) {
-    const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
-    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
-  }
-  // Nominatim lookup
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}`;
-    const arr = await safeFetchJSON(url);
-    if (Array.isArray(arr) && arr.length > 0) return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon) };
-  } catch (e) {
-    console.warn("Nominatim failed:", e);
-  }
-  return null;
-}
-
-async function requestOSRMRoute(origin, destination) {
-  const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
-  const url = `${OSRM_SERVER}/route/v1/driving/${coords}?overview=full&alternatives=true&geometries=geojson`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`OSRM ${r.status}`);
-  return await r.json();
-}
+// No changes required to this file to push to GitHub.

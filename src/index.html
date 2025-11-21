@@ -5,12 +5,28 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>AI FloodSafe Navigator — NOAH Base Map</title>
 
+  <!-- ensure relative assets resolve when served from a repo subpath (GitHub Pages) -->
+  <base href="./" />
+
   <!-- site styles -->
   <link rel="stylesheet" href="css/styles.css" />
 
   <!-- MapLibre (no API key required) -->
+  <!-- Use explicit https:// URLs (not protocol-relative) so they load reliably -->
   <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+
+  <!-- Minimal inline layout styles to ensure map container is visible -->
+  <style>
+    /* Ensure app fills viewport and map has height */
+    html, body { height: 100%; margin: 0; }
+    .app-root { display: flex; height: 100vh; min-height: 100vh; }
+    aside.panel { width: 320px; max-width: 40%; box-sizing: border-box; overflow-y: auto; padding: 1rem; }
+    main.map-container { flex: 1 1 auto; display: flex; }
+    #map { flex: 1 1 auto; min-height: 0; height: 100%; }
+    /* simple marker style (keeps existing app visuals) */
+    .flood-marker { width: 12px; height: 12px; background: rgba(200,30,30,0.9); border-radius: 50%; border: 2px solid white; box-shadow: 0 0 3px rgba(0,0,0,0.3); }
+  </style>
 </head>
 <body>
   <div id="app" class="app-root">
@@ -42,16 +58,7 @@
 
       <hr />
 
-      <h3>Project screenshots (local)</h3>
-      <ul>
-        <li><a href="docs/screenshots/582284537_2236403060176744_4408406701664767618_n.jpg" target="_blank">Screenshot 1</a></li>
-        <li><a href="docs/screenshots/582342251_863438322689820_546795045267350628_n.jpg" target="_blank">Screenshot 2</a></li>
-        <li><a href="docs/screenshots/582272343_1048096297394230_5808524532382698319_n.jpg" target="_blank">Screenshot 3</a></li>
-        <li><a href="docs/screenshots/582057602_1111516801054195_574992022482687645_n.jpg" target="_blank">Screenshot 4</a></li>
-        <li><a href="file:///mnt/data/d5f06fea-e14b-42ea-bbf4-41e4e35224db.png" target="_blank">Folder structure screenshot (local)</a></li>
-      </ul>
-
-      <p class="notes">Tip: deploy to Vercel or run a local HTTP server (Live Server / python -m http.server) so MapLibre and NOAH requests work correctly.</p>
+      <p class="notes">Tip: deploy to Vercel for serverless /api proxies (AccuWeather / NOAH). GitHub Pages can host the static app but has no serverless /api endpoints — the app will gracefully skip proxy-dependent features.</p>
     </aside>
 
     <main class="map-container">
